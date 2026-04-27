@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8"/>
+    <title>StockSafe</title>
+    <script>
+      // GitHub Pages SPA routing fix
+      // Salva il path completo e redirige all'index con il path come parametro
+      var l = window.location;
+      var base = '/stocksafe';
+      var path = l.pathname.replace(base, '') || '/';
+      var redirect = base + '/?p=' + encodeURIComponent(path + l.search) + l.hash;
+      l.replace(redirect);
+    </script>
+  </head>
+  <body></body>
+</html>

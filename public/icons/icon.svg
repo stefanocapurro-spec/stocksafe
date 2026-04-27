@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Sfondo diamante stile Superman -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a2a6c"/>
+      <stop offset="50%" stop-color="#1565C0"/>
+      <stop offset="100%" stop-color="#0D47A1"/>
+    </linearGradient>
+    <linearGradient id="yellow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD600"/>
+      <stop offset="100%" stop-color="#F9A825"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E53935"/>
+      <stop offset="100%" stop-color="#B71C1C"/>
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Diamante esterno giallo -->
+  <polygon points="256,18 494,256 256,494 18,256" fill="url(#yellow)" filter="url(#shadow)"/>
+
+  <!-- Diamante interno blu -->
+  <polygon points="256,52 460,256 256,460 52,256" fill="url(#bg)"/>
+
+  <!-- Bordo rosso interno -->
+  <polygon points="256,52 460,256 256,460 52,256" fill="none" stroke="url(#red)" stroke-width="12"/>
+
+  <!-- Lettera S stilizzata StockSafe -->
+  <!-- Curva superiore della S -->
+  <path d="M182 168 Q182 138 212 130 L300 130 Q340 130 340 168 Q340 200 310 210 L230 230 Q190 240 190 272 Q190 310 222 318 L310 318 Q350 318 350 280" 
+        fill="none" stroke="url(#red)" stroke-width="42" stroke-linecap="round"/>
+  <!-- Corpo S -->
+  <path d="M182 168 Q182 138 212 130 L300 130 Q340 130 340 168 Q340 200 310 210 L230 230 Q190 240 190 272 Q190 310 222 318 L310 318 Q350 318 350 280"
+        fill="none" stroke="#FFD600" stroke-width="30" stroke-linecap="round"/>
+
+  <!-- Punto decorativo in basso a destra (stile logo) -->
+  <circle cx="390" cy="390" r="18" fill="#FFD600" opacity="0.6"/>
+</svg>
