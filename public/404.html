@@ -1,17 +1,16 @@
 <!DOCTYPE html>
-<html lang="it">
-  <head>
-    <meta charset="UTF-8"/>
-    <title>StockSafe</title>
-    <script>
-      // GitHub Pages SPA routing fix
-      // Salva il path completo e redirige all'index con il path come parametro
-      var l = window.location;
-      var base = '/stocksafe';
-      var path = l.pathname.replace(base, '') || '/';
-      var redirect = base + '/?p=' + encodeURIComponent(path + l.search) + l.hash;
-      l.replace(redirect);
-    </script>
-  </head>
-  <body></body>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <script>
+    // SPA redirect per GitHub Pages
+    // Quando si accede direttamente a /stocksafe/inventory ecc,
+    // GitHub serve questo 404.html. Salviamo il percorso e torniamo all'index.
+    var seg = window.location.pathname.split('/').slice(0,2).join('/'); // /stocksafe
+    var path = window.location.pathname.slice(seg.length) || '/';
+    sessionStorage.setItem('spa_path', path + window.location.search);
+    window.location.replace(seg + '/');
+  </script>
+</head>
+<body></body>
 </html>

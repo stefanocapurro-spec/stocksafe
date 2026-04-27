@@ -1,9 +1,7 @@
-name: Build & Deploy su GitHub Pages
+name: Deploy StockSafe
 
 on:
   push:
-    branches: [main]
-  pull_request:
     branches: [main]
 
 permissions:
@@ -13,32 +11,30 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build
+  build-and-deploy:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
 
-      - name: Installa dipendenze
+      - name: Install
         run: npm ci
 
-      - name: Controllo TypeScript
+      - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Build produzione
+      - name: Build
         run: npm run build
         env:
           VITE_SUPABASE_URL:      ${{ secrets.VITE_SUPABASE_URL }}
@@ -46,20 +42,10 @@ jobs:
           VITE_ADMIN_EMAIL:       ${{ secrets.VITE_ADMIN_EMAIL }}
           VITE_BASE_URL:          /stocksafe/
 
-      - name: Carica artefatto Pages
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
-  deploy:
-    name: Deploy su GitHub Pages
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy su GitHub Pages
-        id: deployment
+      - name: Deploy
+        id: deploy
         uses: actions/deploy-pages@v4
