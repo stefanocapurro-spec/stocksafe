@@ -123,15 +123,8 @@ export function AddItemPage() {
           if (!name && info.name)   { setName(info.name);   markDirty() }
           if (!brand && info.brand) { setBrand(info.brand); markDirty() }
           // Auto-compila peso/volume se rilevato
-          if (info.weightValue && info.weightUnit) {
-            setQuantity(String(info.weightValue))
-            setUnit(info.weightUnit as ItemUnit)
-            markDirty()
-          }
           if (info.imageUrl) { setImageUrl(info.imageUrl); markDirty() }
-          const wLabel = info.weightValue && info.weightUnit
-            ? ` · ${info.weightValue} ${info.weightUnit}` : ''
-          setBarcodeInfo(`✓ Trovato: ${info.name || 'Prodotto'}${wLabel}`)
+          setBarcodeInfo(`✓ Trovato: ${info.name || 'Prodotto'}`)
         } else {
           setBarcodeInfo('Prodotto non trovato nel database. Compila manualmente.')
         }
@@ -283,15 +276,8 @@ export function AddItemPage() {
                   if (info.found) {
                     if (!name && info.name)   { setName(info.name);   markDirty() }
                     if (!brand && info.brand) { setBrand(info.brand); markDirty() }
-                    if (info.weightValue && info.weightUnit) {
-                      setQuantity(String(info.weightValue))
-                      setUnit(info.weightUnit as ItemUnit)
-                      markDirty()
-                    }
                     if (info.imageUrl) { setImageUrl(info.imageUrl); markDirty() }
-                    const wLabel = info.weightValue && info.weightUnit
-                      ? ` · ${info.weightValue} ${info.weightUnit}` : ''
-                    setBarcodeInfo(`✓ ${info.name || 'Trovato'}${wLabel}`)
+                    setBarcodeInfo(`✓ ${info.name || 'Trovato'}`)
                   } else setBarcodeInfo('Non trovato in nessun database.')
                 }}>Cerca</button>
             )}
