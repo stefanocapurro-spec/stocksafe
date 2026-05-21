@@ -1,15 +1,16 @@
 /**
- * StockSafe – Barcode Scanner v3
+ * StockSafe – Barcode Scanner v4 (iOS Safari compatible)
  *
- * Scanner:
- *  1. getUserMedia (stream cached → nessun repermesso)
- *  2. BarcodeDetector nativo (Chrome 83+/Edge) se disponibile → più veloce
- *  3. Fallback: ZXing decodeContinuously (Firefox, Safari)
+ * Strategia scanner:
+ *  1. getUserMedia diretto con facingMode (NON deviceId → compatibile iOS)
+ *  2. Video element configurato con playsInline + muted prima del play
+ *  3. BarcodeDetector nativo (Chrome/Edge) → RAF loop
+ *  4. Fallback ZXing: canvas polling con MultiFormatReader (affidabile su Safari)
  *
  * Lookup prodotto (cascata):
- *  1. Open Food Facts world → campi estesi (nome, brand, categoria, peso/volume, immagine)
- *  2. Open Food Facts IT    → endpoint italiano per prodotti locali
- *  3. UPC Item DB           → fallback per prodotti non-food
+ *  1. Open Food Facts world (nome IT, brand, categoria, peso, immagine)
+ *  2. Open Food Facts IT   (prodotti locali italiani)
+ *  3. UPC Item DB          (prodotti non-food)
  */
 
 // ── Stream caching ────────────────────────────────────────────────────────────
@@ -18,15 +19,25 @@ let cachedStream: MediaStream | null = null
 
 async function getStream(): Promise<MediaStream> {
   if (cachedStream?.active) return cachedStream
-  cachedStream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: { ideal: 'environment' },
-      width:  { ideal: 1280 },
-      height: { ideal: 720 },
-    },
-    audio: false,
-  })
-  return cachedStream
+
+  // Prima tenta la fotocamera posteriore esatta, poi ideal, poi qualsiasi
+  const attempts: MediaStreamConstraints['video'][] = [
+    { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    { facingMode: 'environment' },
+    true,
+  ]
+
+  let lastErr: unknown
+  for (const video of attempts) {
+    try {
+      cachedStream = await navigator.mediaDevices.getUserMedia({ video, audio: false })
+      return cachedStream
+    } catch (e) {
+      lastErr = e
+    }
+  }
+  throw lastErr
 }
 
 export function releaseStream() {
@@ -34,7 +45,7 @@ export function releaseStream() {
   cachedStream = null
 }
 
-// ── BarcodeDetector nativo ────────────────────────────────────────────────────
+// ── BarcodeDetector nativo (Chrome 83+/Edge — NON Safari) ────────────────────
 
 type NativeDetector = {
   detect(src: HTMLVideoElement | HTMLCanvasElement): Promise<{ rawValue: string }[]>
@@ -52,6 +63,38 @@ async function getNativeDetector(): Promise<NativeDetector | null> {
   } catch { return null }
 }
 
+// ── ZXing canvas polling (Safari / Firefox) ───────────────────────────────────
+
+type ZXingReader = {
+  decode(bmp: unknown): { getText(): string }
+}
+
+async function makeZxingReader(): Promise<ZXingReader | null> {
+  try {
+    const zx = await import('@zxing/library')
+    return new (zx.MultiFormatReader as new () => ZXingReader)()
+  } catch { return null }
+}
+
+async function decodeFrame(
+  canvas: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D,
+  videoEl: HTMLVideoElement,
+  reader: ZXingReader
+): Promise<string | null> {
+  if (videoEl.readyState < 2 || videoEl.videoWidth === 0) return null
+  canvas.width  = videoEl.videoWidth
+  canvas.height = videoEl.videoHeight
+  ctx.drawImage(videoEl, 0, 0)
+  try {
+    const zx = await import('@zxing/library')
+    const source = new zx.HTMLCanvasElementLuminanceSource(canvas)
+    const bmp    = new zx.BinaryBitmap(new zx.HybridBinarizer(source))
+    const result = reader.decode(bmp)
+    return result?.getText() ?? null
+  } catch { return null }
+}
+
 // ── Scanner principale ────────────────────────────────────────────────────────
 
 export async function startScanner(
@@ -61,39 +104,42 @@ export async function startScanner(
 ): Promise<() => void> {
   let stopped = false
   let rafId: number | null = null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let zxingReader: any = null
 
   try {
     const stream = await getStream()
 
-    // Attacca stream e aspetta che il video sia pronto
-    videoEl.srcObject = stream
+    // Configurazione critica per iOS Safari
+    videoEl.srcObject  = stream
+    videoEl.muted      = true
+    videoEl.playsInline = true
+
+    // Aspetta che il video sia pronto (iOS emette loadedmetadata più lentamente)
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Timeout avvio fotocamera (8s)')), 8000)
-      videoEl.onloadedmetadata = () => {
+      const timeout = setTimeout(
+        () => reject(new Error('Timeout avvio fotocamera — verifica i permessi nelle Impostazioni iPhone.')),
+        10000
+      )
+      const tryPlay = () => {
         clearTimeout(timeout)
-        videoEl.play().then(resolve).catch(reject)
+        videoEl.play()
+          .then(resolve)
+          .catch(reject)
       }
-      videoEl.onerror = () => {
-        clearTimeout(timeout)
-        reject(new Error('Errore caricamento video'))
-      }
+      if (videoEl.readyState >= 2) { tryPlay(); return }
+      videoEl.onloadedmetadata = tryPlay
+      videoEl.onerror = () => { clearTimeout(timeout); reject(new Error('Errore stream video')) }
     })
 
     const nativeDetector = await getNativeDetector()
 
     if (nativeDetector) {
-      // ── Percorso 1: BarcodeDetector nativo ──────────────────────────────
+      // ── BarcodeDetector nativo (Chrome/Edge) ──────────────────────────────
       const tick = async () => {
         if (stopped) return
         try {
           if (videoEl.readyState >= 2) {
             const hits = await nativeDetector.detect(videoEl)
-            if (hits[0]?.rawValue) {
-              onDetect(hits[0].rawValue)
-              return
-            }
+            if (hits[0]?.rawValue) { onDetect(hits[0].rawValue); return }
           }
         } catch { /* frame non decodificabile */ }
         rafId = requestAnimationFrame(tick)
@@ -101,33 +147,39 @@ export async function startScanner(
       tick()
 
     } else {
-      // ── Percorso 2: ZXing decodeContinuously ────────────────────────────
-      const { BrowserMultiFormatReader } = await import('@zxing/library')
-      zxingReader = new BrowserMultiFormatReader()
+      // ── ZXing canvas polling (Safari / Firefox) ────────────────────────────
+      const zxingReader = await makeZxingReader()
+      if (!zxingReader) {
+        onError?.(new Error('Libreria barcode non disponibile.'))
+        return () => { stopped = true }
+      }
 
-      zxingReader.decodeContinuously(videoEl, (result: unknown, err: unknown) => {
+      const canvas = document.createElement('canvas')
+      const ctx    = canvas.getContext('2d')!
+      // Poll ogni ~150ms (6-7 fps) — sufficiente per barcode, non drena la batteria
+      let lastTime = 0
+      const INTERVAL = 150
+
+      const tick = (now: number) => {
         if (stopped) return
-        if (result) {
-          const r = result as { getText(): string }
-          const code = r.getText()
-          if (code) onDetect(code)
-        }
-        void err
-      })
+        rafId = requestAnimationFrame(tick)
+        if (now - lastTime < INTERVAL) return
+        lastTime = now
+        decodeFrame(canvas, ctx, videoEl, zxingReader).then(code => {
+          if (code && !stopped) { onDetect(code) }
+        })
+      }
+      rafId = requestAnimationFrame(tick)
     }
 
   } catch (e) {
     onError?.(e as Error)
   }
 
-  // Stop: mette in pausa ma NON rilascia lo stream → permesso non richiesto di nuovo
+  // Stop: pausa stream senza rilasciarlo → iOS non chiede nuovamente il permesso
   return () => {
     stopped = true
     if (rafId !== null) cancelAnimationFrame(rafId)
-    if (zxingReader) {
-      try { zxingReader.stopContinuousDecode() } catch { /* già fermo */ }
-      try { zxingReader.reset() } catch { /* già resettato */ }
-    }
     videoEl.pause()
     videoEl.srcObject = null
   }
@@ -146,17 +198,14 @@ export interface ProductInfo {
   imageUrl:    string
   barcode:     string
   found:       boolean
-  // Peso / volume estratti dal packaging
-  weightValue: number | null   // valore numerico
-  weightUnit:  string | null   // unità: g, kg, ml, l, cl, mg, pz
+  weightValue: number | null
+  weightUnit:  string | null
 }
 
-/** Converte la stringa "quantity" di Open Food Facts in valore + unità */
 function parseQuantityString(raw: string | null | undefined): { val: number | null; unit: string | null } {
   if (!raw) return { val: null, unit: null }
   const s = raw.toLowerCase().replace(',', '.').trim()
 
-  // Pattern principale: "500 g", "1.5 kg", "250 ml", "1 l", "33 cl", "200 mg"
   const m = s.match(/^(\d+(?:\.\d+)?)\s*(g|kg|ml|l|cl|mg|pz|oz|lb)\b/)
   if (m) {
     let val  = parseFloat(m[1])
@@ -165,11 +214,8 @@ function parseQuantityString(raw: string | null | undefined): { val: number | nu
     if (unit === 'lb') { val = parseFloat((val * 0.4536).toFixed(3)); unit = 'kg' }
     return { val, unit }
   }
-
-  // Pattern multiplo: "6 x 33 cl" → 6 pz
   const multi = s.match(/^(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*(g|kg|ml|l|cl|mg)/)
   if (multi) return { val: parseInt(multi[1]), unit: 'pz' }
-
   return { val: null, unit: null }
 }
 
@@ -178,11 +224,10 @@ const empty = (barcode: string): ProductInfo => ({
   weightValue: null, weightUnit: null,
 })
 
-/** Open Food Facts – endpoint configurabile */
 async function fetchOFF(barcode: string, host = 'world'): Promise<ProductInfo | null> {
   try {
-    const url = `https://${host}.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}?fields=product_name,product_name_it,brands,categories_tags,image_front_small_url,quantity,product_quantity,product_quantity_unit`
-    const res  = await fetch(url, { signal: AbortSignal.timeout(6000) })
+    const url = `https://${host}.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}?fields=product_name,product_name_it,brands,categories_tags,image_front_small_url,quantity,product_quantity`
+    const res  = await fetch(url, { signal: AbortSignal.timeout(7000) })
     if (!res.ok) return null
     const data = await res.json()
     if (data.status !== 1 || !data.product) return null
@@ -193,62 +238,49 @@ async function fetchOFF(barcode: string, host = 'world'): Promise<ProductInfo | 
 
     const catTag: string = (p.categories_tags as string[] ?? [])
       .find((t: string) => t.startsWith('it:')) ?? (p.categories_tags as string[])?.[0] ?? ''
-    const category = catTag.replace(/^[a-z]{2}:/, '').replace(/-/g, ' ')
 
     const { val: weightValue, unit: weightUnit } =
       parseQuantityString(p.quantity ?? p.product_quantity)
 
     return {
-      name, brand: (p.brands || '').split(',')[0].trim(),
-      category, imageUrl: p.image_front_small_url || '',
+      name,
+      brand:    (p.brands || '').split(',')[0].trim(),
+      category: catTag.replace(/^[a-z]{2}:/, '').replace(/-/g, ' '),
+      imageUrl: p.image_front_small_url || '',
       barcode, found: true, weightValue, weightUnit,
     }
   } catch { return null }
 }
 
-/** UPC Item DB – fallback gratuito, no API key */
 async function fetchUpcItemDb(barcode: string): Promise<ProductInfo | null> {
   try {
     const res = await fetch(
       `https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(barcode)}`,
-      { signal: AbortSignal.timeout(6000) }
+      { signal: AbortSignal.timeout(7000) }
     )
     if (!res.ok) return null
     const data = await res.json()
     const item = data?.items?.[0]
     if (!item) return null
-
-    const titleLower: string = (item.title ?? '').toLowerCase()
-    const wm = titleLower.match(/(\d+(?:\.\d+)?)\s*(g|kg|ml|l|cl|mg)\b/)
-    const weightValue = wm ? parseFloat(wm[1]) : null
-    const weightUnit  = wm ? wm[2] : null
-
+    const wm = (item.title ?? '').toLowerCase().match(/(\d+(?:\.\d+)?)\s*(g|kg|ml|l|cl|mg)\b/)
     return {
       name:        item.title    || '',
       brand:       item.brand    || '',
       category:    item.category || '',
       imageUrl:    item.images?.[0] || '',
       barcode, found: true,
-      weightValue, weightUnit,
+      weightValue: wm ? parseFloat(wm[1]) : null,
+      weightUnit:  wm ? wm[2] : null,
     }
   } catch { return null }
 }
 
-/**
- * Lookup barcode: cascata su più sorgenti.
- * 1. Open Food Facts world
- * 2. Open Food Facts IT
- * 3. UPC Item DB
- */
 export async function lookupBarcode(barcode: string): Promise<ProductInfo> {
   const world = await fetchOFF(barcode, 'world')
   if (world) return world
-
   const it = await fetchOFF(barcode, 'it')
   if (it) return it
-
   const upc = await fetchUpcItemDb(barcode)
   if (upc) return upc
-
   return empty(barcode)
 }

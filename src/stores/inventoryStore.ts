@@ -43,7 +43,6 @@ export interface ItemPayload {
   locationId?:    string | null
   purchaseDate?:  string | null
   expiryDate?:    string | null
-  imageUrl?:      string | null
 }
 
 interface InventoryState {
@@ -76,7 +75,6 @@ async function encryptPayload(p: ItemPayload) {
     encrypted_data:  ciphertext,  iv_hex:         ivHex,
     encrypted_value: valEnc.ciphertext, iv_value_hex: valEnc.ivHex,
     quantity:      p.quantity,    unit:           p.unit,
-    image_url:     p.imageUrl ?? null,
     category_id:   p.categoryId  ?? null,
     location_id:   p.locationId  ?? null,
     purchase_date: p.purchaseDate ?? null,
@@ -165,7 +163,6 @@ export const useInventoryStore = create<InventoryState>()((set, get) => ({
         locationId:    payload.locationId  !== undefined ? payload.locationId  : existing.locationId,
         purchaseDate:  payload.purchaseDate !== undefined ? payload.purchaseDate : existing.purchaseDate,
         expiryDate:    payload.expiryDate   !== undefined ? payload.expiryDate  : existing.expiryDate,
-        imageUrl:      payload.imageUrl     !== undefined ? payload.imageUrl    : existing.imageUrl,
       }
       const enc = await encryptPayload(merged)
       const { data, error } = await supabase.from('items')
