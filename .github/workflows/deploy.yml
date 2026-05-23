@@ -1,12 +1,13 @@
-name: Deploy StockSafe
+name: Deploy StockSafe to GitHub Pages
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
+  pages:    write
   id-token: write
 
 concurrency:
@@ -18,15 +19,15 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: 22
+          cache: npm
 
       - name: Install
         run: npm ci
@@ -35,17 +36,24 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Build
-        run: npm run build
         env:
-          VITE_SUPABASE_URL:      ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          VITE_ADMIN_EMAIL:       ${{ secrets.VITE_ADMIN_EMAIL }}
-          VITE_BASE_URL:          /stocksafe/
+          VITE_SUPABASE_URL:       ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY:  ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_ADMIN_EMAIL:        ${{ secrets.VITE_ADMIN_EMAIL }}
+          VITE_COMMUNITY_KEY:      ${{ secrets.VITE_COMMUNITY_KEY }}
+          VITE_BASE_URL:           /stocksafe/
+        run: npm run build
 
-      - uses: actions/upload-pages-artifact@v3
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: dist
+          # overwrite evita l'errore "Multiple artifacts" da run precedenti
+          overwrite: true
 
-      - name: Deploy
-        id: deploy
+      - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
