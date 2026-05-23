@@ -1,17 +1,11 @@
 /**
- * StockSafe – Barcode Scanner v5
+ * StockSafe – Barcode Scanner v6 (iOS PWA fix)
  *
- * Scanner (iOS Safari compatible):
- *   getUserMedia diretto, playsInline+muted, fallback a cascata
- *   BarcodeDetector nativo (Chrome/Edge) oppure ZXing canvas polling
+ * Problema iOS PWA: loadedmetadata non viene mai emesso dentro una PWA
+ * installata (standalone). Fix: ascolta 4 eventi + polling su readyState.
  *
- * Database lookup – cascata completa:
- *   1. Open Food Facts     (world + IT) – alimenti
- *   2. Open Beauty Facts               – cosmetici e cura della persona
- *   3. Open Pet Food Facts             – alimenti per animali
- *   4. Open Products Facts             – prodotti generici
- *   5. UPC Item DB                     – elettronica, vestiario, altro
- *   6. Community DB (Supabase)         – prodotti inseriti dagli utenti
+ * Lookup cascade: OFF world/IT → Open Beauty → Open Pet Food →
+ *                 Open Products → UPC Item DB → Community DB
  */
 
 // ── Stream caching ────────────────────────────────────────────────────────────
@@ -21,6 +15,7 @@ let cachedStream: MediaStream | null = null
 async function getStream(): Promise<MediaStream> {
   if (cachedStream?.active) return cachedStream
 
+  // Cascata tentativi: exact → ideal → generic → any
   const attempts: MediaStreamConstraints['video'][] = [
     { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
     { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -41,6 +36,52 @@ async function getStream(): Promise<MediaStream> {
 export function releaseStream() {
   cachedStream?.getTracks().forEach(t => t.stop())
   cachedStream = null
+}
+
+// ── Aspetta che il video sia pronto (iOS PWA safe) ────────────────────────────
+
+function waitForVideoReady(videoEl: HTMLVideoElement, timeoutMs = 12000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Già pronto?
+    if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) { resolve(); return }
+
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error(
+        'Timeout fotocamera. Su iPhone: Impostazioni → Safari → ' +
+        'Fotocamera → Consenti, poi ricarica la pagina.'
+      ))
+    }, timeoutMs)
+
+    const onReady = () => {
+      // Su iOS readyState può essere 1 (HAVE_METADATA) ma videoWidth è già > 0
+      if (videoEl.videoWidth > 0 || videoEl.readyState >= 2) {
+        cleanup(); resolve()
+      }
+    }
+
+    // Polling di sicurezza — iOS a volte non emette nessun evento
+    const poll = setInterval(() => {
+      if (videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
+        cleanup(); resolve()
+      }
+    }, 100)
+
+    const cleanup = () => {
+      clearTimeout(timer)
+      clearInterval(poll)
+      videoEl.removeEventListener('loadedmetadata', onReady)
+      videoEl.removeEventListener('loadeddata',     onReady)
+      videoEl.removeEventListener('canplay',        onReady)
+      videoEl.removeEventListener('canplaythrough', onReady)
+    }
+
+    videoEl.addEventListener('loadedmetadata', onReady)
+    videoEl.addEventListener('loadeddata',     onReady)
+    videoEl.addEventListener('canplay',        onReady)
+    videoEl.addEventListener('canplaythrough', onReady)
+    videoEl.addEventListener('error', () => { cleanup(); reject(new Error('Errore stream video')) }, { once: true })
+  })
 }
 
 // ── BarcodeDetector nativo ────────────────────────────────────────────────────
@@ -76,7 +117,7 @@ async function decodeFrame(
   canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D,
   videoEl: HTMLVideoElement, reader: ZXingReader
 ): Promise<string | null> {
-  if (videoEl.readyState < 2 || videoEl.videoWidth === 0) return null
+  if (videoEl.readyState < 1 || videoEl.videoWidth === 0) return null
   canvas.width  = videoEl.videoWidth
   canvas.height = videoEl.videoHeight
   ctx.drawImage(videoEl, 0, 0)
@@ -100,20 +141,26 @@ export async function startScanner(
 
   try {
     const stream = await getStream()
-    videoEl.srcObject   = stream
+
+    // Attributi critici iOS — impostati prima di srcObject
     videoEl.muted       = true
     videoEl.playsInline = true
+    videoEl.setAttribute('playsinline', '')   // attributo HTML esplicito per Safari
+    videoEl.setAttribute('webkit-playsinline', '') // vecchio Safari
+    videoEl.srcObject   = stream
 
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(
-        () => reject(new Error('Timeout fotocamera — verifica i permessi nelle Impostazioni.')),
-        10000
-      )
-      const tryPlay = () => { clearTimeout(timeout); videoEl.play().then(resolve).catch(reject) }
-      if (videoEl.readyState >= 2) { tryPlay(); return }
-      videoEl.onloadedmetadata = tryPlay
-      videoEl.onerror = () => { clearTimeout(timeout); reject(new Error('Errore stream video')) }
-    })
+    // Tenta play immediato (iOS richiede gesto utente, ma qui siamo in un click)
+    try { await videoEl.play() } catch { /* se fallisce aspettiamo gli eventi */ }
+
+    // Aspetta che il video abbia dimensioni reali
+    await waitForVideoReady(videoEl)
+
+    // Se play non era partito, ritenta
+    if (videoEl.paused) {
+      try { await videoEl.play() } catch (e) {
+        throw new Error('Impossibile avviare il video. Controlla i permessi fotocamera.')
+      }
+    }
 
     const nativeDetector = await getNativeDetector()
 
@@ -121,7 +168,7 @@ export async function startScanner(
       const tick = async () => {
         if (stopped) return
         try {
-          if (videoEl.readyState >= 2) {
+          if (videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
             const hits = await nativeDetector.detect(videoEl)
             if (hits[0]?.rawValue) { onDetect(hits[0].rawValue); return }
           }
@@ -131,7 +178,10 @@ export async function startScanner(
       tick()
     } else {
       const zxingReader = await makeZxingReader()
-      if (!zxingReader) { onError?.(new Error('Libreria barcode non disponibile.')); return () => { stopped = true } }
+      if (!zxingReader) {
+        onError?.(new Error('Libreria barcode non disponibile.'))
+        return () => { stopped = true }
+      }
       const canvas = document.createElement('canvas')
       const ctx    = canvas.getContext('2d')!
       let lastTime = 0
@@ -173,7 +223,7 @@ export interface ProductInfo {
   found:       boolean
   weightValue: number | null
   weightUnit:  string | null
-  source?:     string   // 'off' | 'obf' | 'opff' | 'opf' | 'upc' | 'community'
+  source?:     string
 }
 
 function parseQuantityString(raw: string | null | undefined): { val: number | null; unit: string | null } {
@@ -195,8 +245,6 @@ const empty = (barcode: string): ProductInfo => ({
   name:'', brand:'', category:'', imageUrl:'', barcode, found:false,
   weightValue: null, weightUnit: null,
 })
-
-// ── Open*Facts (OFF/OBF/OPFF/OPF) ────────────────────────────────────────────
 
 type OFFHost = 'world.openfoodfacts' | 'world.openbeautyfacts' | 'world.openpetfoodfacts' | 'world.openproductsfacts'
 
@@ -222,8 +270,6 @@ async function fetchOpenFacts(barcode: string, host: OFFHost, sourceName: string
   } catch { return null }
 }
 
-// ── UPC Item DB ───────────────────────────────────────────────────────────────
-
 async function fetchUpcItemDb(barcode: string): Promise<ProductInfo | null> {
   try {
     const res = await fetch(
@@ -236,22 +282,14 @@ async function fetchUpcItemDb(barcode: string): Promise<ProductInfo | null> {
     if (!item) return null
     const wm = (item.title ?? '').toLowerCase().match(/(\d+(?:\.\d+)?)\s*(g|kg|ml|l|cl|mg)\b/)
     return {
-      name:        item.title    || '',
-      brand:       item.brand    || '',
-      category:    item.category || '',
-      imageUrl:    item.images?.[0] || '',
-      barcode, found: true,
-      weightValue: wm ? parseFloat(wm[1]) : null,
-      weightUnit:  wm ? wm[2] : null,
-      source: 'upc',
+      name: item.title || '', brand: item.brand || '', category: item.category || '',
+      imageUrl: item.images?.[0] || '', barcode, found: true,
+      weightValue: wm ? parseFloat(wm[1]) : null, weightUnit: wm ? wm[2] : null, source: 'upc',
     }
   } catch { return null }
 }
 
-// ── Lookup cascata ────────────────────────────────────────────────────────────
-
 export async function lookupBarcode(barcode: string): Promise<ProductInfo> {
-  // Fase 1: database pubblici in parallelo per velocità
   const [offWorld, obf, opff, opf] = await Promise.all([
     fetchOpenFacts(barcode, 'world.openfoodfacts',    'off'),
     fetchOpenFacts(barcode, 'world.openbeautyfacts',  'obf'),
@@ -259,18 +297,16 @@ export async function lookupBarcode(barcode: string): Promise<ProductInfo> {
     fetchOpenFacts(barcode, 'world.openproductsfacts','opf'),
   ])
   const publicResult = offWorld ?? obf ?? opff ?? opf
-
-  // Fase 2: se non trovato nei database pubblici, prova UPC Item DB
   if (publicResult) return publicResult
+
   const upc = await fetchUpcItemDb(barcode)
   if (upc) return upc
 
-  // Fase 3: database community (lazy import per non caricare supabase se non serve)
   try {
     const { communityLookup } = await import('./communityDb')
     const community = await communityLookup(barcode)
     if (community) return { ...community, source: 'community' }
-  } catch { /* community db non disponibile, non blocca */ }
+  } catch { /* community db non disponibile */ }
 
   return empty(barcode)
 }

@@ -105,19 +105,19 @@ export function LoginPage() {
       {displayError    && <div className="alert alert-error"><span>⚠</span> {displayError}</div>}
       {emailConfirmMsg && <div className="alert alert-success"><span>📧</span> {emailConfirmMsg}</div>}
 
-      <form onSubmit={handleLogin} autoComplete="on"
+      <form onSubmit={handleLogin} autoComplete="on" id="login-form"
         style={{ display:'flex', flexDirection:'column', gap:13 }}>
         <div className="field">
           <label>Email</label>
           <input type="email" className="input" value={email}
             onChange={e => setEmail(e.target.value)}
-            autoComplete="email" required placeholder="mario@esempio.it"/>
+            autoComplete="email" name="username" id="login-email" required placeholder="mario@esempio.it"/>
         </div>
         <div className="field">
           <label>Password</label>
           <input type="password" className="input" value={password}
             onChange={e => setPassword(e.target.value)}
-            autoComplete="current-password" required/>
+            autoComplete="current-password" name="password" id="login-password" required/>
           <small style={{ color:'var(--text-muted)', fontSize:'0.73rem' }}>
             Questa password cifra anche i tuoi dati — cambiarla invalida i dati precedenti.
           </small>
