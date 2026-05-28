@@ -19,9 +19,7 @@ interface AuthState {
   isAdmin:         boolean
   loading:         boolean
   error:           string | null
-  _email:    string
-  _password: string
-
+  
   register:               (email: string, password: string) => Promise<void>
   login:                  (email: string, password: string) => Promise<void>
   logout:                 () => Promise<void>
@@ -66,7 +64,6 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null, isAuthenticated: false, cryptoReady: false,
       isAdmin: false, loading: false, error: null,
-      _email: '', _password: '',
 
       clearError: () => set({ error: null }),
 
@@ -104,7 +101,7 @@ export const useAuthStore = create<AuthState>()(
           if (data.session) {
             setSessionKey(key)
             set({ user: data.user, isAuthenticated: true, cryptoReady: true,
-              isAdmin: isAdmin(email), _email: email, _password: password, loading: false })
+              isAdmin: isAdmin(email), loading: false })
           } else {
             // Email di conferma inviata
             set({ loading: false,
@@ -136,7 +133,7 @@ export const useAuthStore = create<AuthState>()(
 
           setSessionKey(key)
           set({ user: data.user, isAuthenticated: true, cryptoReady: true,
-            isAdmin: isAdmin(email), _email: email, _password: password, loading: false })
+            isAdmin: isAdmin(email), loading: false })
         } catch (e) {
           await supabase.auth.signOut()
           set({ error: (e as Error).message, loading: false, isAuthenticated: false, cryptoReady: false })
@@ -158,8 +155,7 @@ export const useAuthStore = create<AuthState>()(
             if (!ok) throw new Error('Credenziali errate.')
           }
           setSessionKey(key)
-          set({ cryptoReady: true, isAdmin: isAdmin(email),
-            _email: email, _password: password, loading: false })
+          set({ cryptoReady: true, isAdmin: isAdmin(email), loading: false })
         } catch (e) {
           set({ error: (e as Error).message, loading: false })
         }
@@ -169,8 +165,7 @@ export const useAuthStore = create<AuthState>()(
       logout: async () => {
         clearSessionKey()
         await supabase.auth.signOut()
-        set({ user: null, isAuthenticated: false, cryptoReady: false,
-          isAdmin: false, _email: '', _password: '' })
+        set({ user: null, isAuthenticated: false, cryptoReady: false, isAdmin: false })
       },
 
       // ── RESET PASSWORD (con avviso dati) ───────────────────────────────────
@@ -211,7 +206,7 @@ export const useAuthStore = create<AuthState>()(
           })
           if (rpcErr) throw new Error(rpcErr.message)
           setSessionKey(newKey)
-          set({ _password: newPwd, loading: false })
+          set({ loading: false })
           return { reencrypted }
         } catch (e) {
           set({ error: (e as Error).message, loading: false })
@@ -234,7 +229,7 @@ export const useAuthStore = create<AuthState>()(
           })
           if (rpcErr) throw new Error(rpcErr.message)
           setSessionKey(newKey)
-          set({ cryptoReady: true, _email: email, _password: newPwd, loading: false })
+          set({ cryptoReady: true, loading: false })
         } catch (e) {
           set({ error: (e as Error).message, loading: false })
           throw e
@@ -265,7 +260,7 @@ export const useAuthStore = create<AuthState>()(
           clearSessionKey()
           await supabase.auth.signOut()
           set({ user: null, isAuthenticated: false, cryptoReady: false,
-            isAdmin: false, _email: '', _password: '', loading: false })
+            isAdmin: false, loading: false })
         } catch (e) {
           set({ error: (e as Error).message, loading: false })
         }
