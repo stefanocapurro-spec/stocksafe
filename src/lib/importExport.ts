@@ -100,9 +100,11 @@ export function parseBackupFile(raw: unknown): ParseResult {
 }
 
 function isISODate(v: unknown): boolean {
-  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)
+  if (typeof v !== 'string') return false
+  if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v)) return false
+  const d = new Date(v)
+  return !isNaN(d.getTime())
 }
-
 // ── Lettura file ──────────────────────────────────────────────────────────────
 
 export function readJsonFile(file: File): Promise<unknown> {

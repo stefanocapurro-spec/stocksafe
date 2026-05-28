@@ -40,7 +40,7 @@ async function getCommunityKey(): Promise<CryptoKey | null> {
       'raw', enc.encode(secret), 'PBKDF2', false, ['deriveKey']
     )
     _communityKey = await crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt, iterations: 200_000, hash: 'SHA-256' },
+      { name: 'PBKDF2', salt, iterations: 600_000, hash: 'SHA-256' },
       keyMaterial,
       { name: 'AES-GCM', length: 256 },
       false,
